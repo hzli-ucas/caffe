@@ -33,7 +33,7 @@ message Datum {
   optional int32 width = 3;
   // the actual image data, in bytes
   optional bytes data = 4;
-  optional int32 label = 5;
+  repeated int32 label = 5;
   // Optionally, the datum could also hold float data.
   repeated float float_data = 6;
   // If true data contains an encoded image that need to be decoded
@@ -670,6 +670,8 @@ message DataParameter {
   // Prefetch queue (Increase if data feeding bandwidth varies, within the
   // limit of device memory for GPU training)
   optional uint32 prefetch = 10 [default = 4];
+  // Set label size  to indicate the max possible label length
+  optional uint32 label_size = 11 [default = 1];
 }
 
 message DropoutParameter {
