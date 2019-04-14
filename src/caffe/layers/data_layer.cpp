@@ -48,7 +48,8 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
       << top[0]->width();
   // label
   if (this->output_labels_) {
-    vector<int> label_shape(1, batch_size);
+    vector<int> label_shape(2, batch_size);
+    label_shape[1] = this->layer_param_.data_param().label_size();
     top[1]->Reshape(label_shape);
     for (int i = 0; i < this->prefetch_.size(); ++i) {
       this->prefetch_[i]->label_.Reshape(label_shape);
@@ -88,6 +89,7 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
   CHECK(batch->data_.count());
   CHECK(this->transformed_data_.count());
   const int batch_size = this->layer_param_.data_param().batch_size();
+  const int label_size = this->layer_param_.data_param().label_size();
 
   Datum datum;
   for (int item_id = 0; item_id < batch_size; ++item_id) {
@@ -96,6 +98,15 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
       Next();
     }
     datum.ParseFromString(cursor_->value());
+    // Check the data label size
+    if (this->output_labels_) {
+      while (datum.label_size() > label_size){
+        LOG(WARNING) << "Abandon a sample with " << datum.label_size()
+          << " labels, which exceeds defined label_size = " << label_size;
+        Next();
+        datum.ParseFromString(cursor_->value());
+      }
+    }
     read_time += timer.MicroSeconds();
 
     if (item_id == 0) {
@@ -118,7 +129,11 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     // Copy label.
     if (this->output_labels_) {
       Dtype* top_label = batch->label_.mutable_cpu_data();
-      top_label[item_id] = datum.label();
+      const int label_length = datum.label_size();
+      for (int label_id = 0; label_id < label_length; ++label_id)
+        top_label[item_id * label_size + label_id] = datum.label(label_id);
+      for (int label_id = label_length; label_id < label_size; ++label_id)
+        top_label[item_id * label_size + label_id] = -1;
     }
     trans_time += timer.MicroSeconds();
     Next();
