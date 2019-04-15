@@ -309,6 +309,7 @@ message ParamSpec {
 // Update the next available ID when you add a new LayerParameter field.
 //
 // LayerParameter next available layer-specific ID: 147 (last added: recurrent_param)
+// LayerParameter next avaliable layer-specific ID: 148 (last added: ctc_param)
 message LayerParameter {
   optional string name = 1; // the layer name
   optional string type = 2; // the layer type
@@ -368,6 +369,7 @@ message LayerParameter {
   optional ContrastiveLossParameter contrastive_loss_param = 105;
   optional ConvolutionParameter convolution_param = 106;
   optional CropParameter crop_param = 144;
+  optional CTCParameter ctc_param = 147;
   optional DataParameter data_param = 107;
   optional DropoutParameter dropout_param = 108;
   optional DummyDataParameter dummy_data_param = 109;
@@ -636,6 +638,33 @@ message CropParameter {
   // axis).
   optional int32 axis = 1 [default = 2];
   repeated uint32 offset = 2;
+}
+
+message CTCParameter {
+  // Specify the channel index for blank label, or it will
+  // default to the last channel, i.e. (channels_num - 1).
+  optional int32 blank_index = 1 [default = -1];
+  // Indicate if the input data has already been normalized with softmax.
+  // For ctc_loss_layer, this decides the way to calculate gradient:
+  //   if (already_softmax) { prob = data; gradient = -groundtruth_prob / prob; }
+  //   if (!already_softmax) { prob = softmax(data); gradient = prob - groundtruth_prob; }
+  optional bool already_softmax = 2 [default = false];
+  // Specify the axis index in the num-channel-time order:
+  // For ctc_loss_layer ===============================================
+  //   1. Two values to indicate the num and channel axis, and the rest
+  //	    axes must be unidimensional to be considered as the time axis.
+  //   2. None value indicates the default num-channel-time order.
+  // Note: cannot be specified when there is an RNN indicator blob,
+  // and the axis order is fixed to be time-num-channel in this case
+  repeated uint32 nct_axis = 3;
+  // The decoding-related parameters
+  enum DecodeOpt {
+	IN_PLACE = 0;
+	BEST_PATH = 1; // merge the repeated labels and remove blanks
+	BEAM_SEARCH = 2; // should specify the beam_width
+  }
+  optional DecodeOpt decode = 4 [default = BEST_PATH];
+  optional uint32 beam_width = 5 [default = 10];
 }
 
 message DataParameter {
