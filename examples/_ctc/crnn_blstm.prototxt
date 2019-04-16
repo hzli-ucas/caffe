@@ -1,0 +1,577 @@
+
+layer {
+  name: "data"
+  type: "Data"
+  top: "data"
+  top: "label"
+  include {
+    phase: TRAIN
+  }
+  data_param {
+    source: "D:/mjsynth_digits100"
+    batch_size: 32
+    backend: LMDB
+    label_size: 35
+  }
+}
+layer {
+  name: "data"
+  type: "Data"
+  top: "data"
+  top: "label"
+  include {
+    phase: TEST
+  }
+  data_param {
+    source: "D:/mjsynth_digits100"
+    batch_size: 32
+    backend: LMDB
+    label_size: 35
+  }
+}
+layer {
+  bottom: "data"
+  top: "conv1"
+  name: "conv1"
+  type: "Convolution"
+  param {
+    lr_mult: 1
+    decay_mult: 1
+  }
+  param {
+    lr_mult: 2
+    decay_mult: 0
+  }
+  convolution_param {
+    num_output: 64
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+    bias_filler {
+      type: "constant"
+      value: 0
+    }
+  }
+}
+layer {
+  bottom: "conv1"
+  top: "conv1"
+  name: "relu1"
+  type: "ReLU"
+}
+layer {
+  bottom: "conv1"
+  top: "pool1"
+  name: "pool1"
+  type: "Pooling"
+  pooling_param {
+    pool: MAX
+    kernel_size: 2
+    stride: 2
+  }
+}
+layer {
+  bottom: "pool1"
+  top: "conv2"
+  name: "conv2"
+  type: "Convolution"
+  param {
+    lr_mult: 1
+    decay_mult: 1
+  }
+  param {
+    lr_mult: 2
+    decay_mult: 0
+  }
+  convolution_param {
+    num_output: 128
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+    bias_filler {
+      type: "constant"
+      value: 0
+    }
+  }
+}
+layer {
+  bottom: "conv2"
+  top: "conv2"
+  name: "relu2"
+  type: "ReLU"
+}
+layer {
+  bottom: "conv2"
+  top: "pool2"
+  name: "pool2"
+  type: "Pooling"
+  pooling_param {
+    pool: MAX
+    kernel_size: 2
+    stride: 2
+  }
+}
+layer {
+  bottom: "pool2"
+  top: "conv3"
+  name: "conv3"
+  type: "Convolution"
+  convolution_param {
+    num_output: 256
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+    bias_term: false
+  }
+}
+layer {
+  bottom:"conv3"
+  top:"conv3"
+  name:"bnorm3"
+  type:"BatchNorm"
+}
+layer {
+  bottom:"conv3"
+  top:"conv3"
+  name:"scale3"
+  type: "Scale"
+  scale_param {
+    bias_term: true
+  }
+}
+layer {
+  bottom: "conv3"
+  top: "conv3"
+  name: "relu3"
+  type: "ReLU"
+}
+layer {
+  bottom: "conv3"
+  top: "conv4"
+  name: "conv4"
+  type: "Convolution"
+  param {
+    lr_mult: 1
+    decay_mult: 1
+  }
+  param {
+    lr_mult: 2
+    decay_mult: 0
+  }
+  convolution_param {
+    num_output: 256
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+    bias_filler {
+      type: "constant"
+      value: 0
+    }
+  }
+}
+layer {
+  bottom: "conv4"
+  top: "conv4"
+  name: "relu4"
+  type: "ReLU"
+}
+layer {
+  bottom: "conv4"
+  top: "pool4"
+  name: "pool4"
+  type: "Pooling"
+  pooling_param {
+    pool: MAX
+    kernel_size: 2
+    stride_h: 2
+    stride_w: 1
+	pad_h: 0
+	pad_w: 1
+  }
+}
+layer {
+  bottom: "pool4"
+  top: "conv5"
+  name: "conv5"
+  type: "Convolution"
+  convolution_param {
+    num_output: 512
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+    bias_term: false
+  }
+}
+layer {
+  bottom:"conv5"
+  top:"conv5"
+  name:"bnorm5"
+  type:"BatchNorm"
+}
+layer {
+  bottom:"conv5"
+  top:"conv5"
+  name:"scale5"
+  type: "Scale"
+  scale_param {
+    bias_term: true
+  }
+}
+layer {
+  bottom: "conv5"
+  top: "conv5"
+  name: "relu5"
+  type: "ReLU"
+}
+layer {
+  bottom: "conv5"
+  top: "conv6"
+  name: "conv6"
+  type: "Convolution"
+  param {
+    lr_mult: 1
+    decay_mult: 1
+  }
+  param {
+    lr_mult: 2
+    decay_mult: 0
+  }
+  convolution_param {
+    num_output: 512
+    kernel_size: 3
+    pad: 1
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+    bias_filler {
+      type: "constant"
+      value: 0
+    }
+  }
+}
+layer {
+  bottom: "conv6"
+  top: "conv6"
+  name: "relu6"
+  type: "ReLU"
+}
+layer {
+  bottom: "conv6"
+  top: "pool6"
+  name: "pool6"
+  type: "Pooling"
+  pooling_param {
+    pool: MAX
+    kernel_size: 2
+    stride_h: 2
+    stride_w: 1
+	pad_h: 0
+	pad_w: 1
+  }
+}
+layer {
+  bottom: "pool6"
+  top: "conv7"
+  name: "conv7"
+  type: "Convolution"
+  convolution_param {
+    num_output: 512
+    kernel_size: 2
+    weight_filler {
+      type: "gaussian"
+      std: 0.01
+    }
+    bias_term: false
+  }
+}
+layer {
+  bottom:"conv7"
+  top:"conv7"
+  name:"bnorm7"
+  type:"BatchNorm"
+}
+layer {
+  bottom:"conv7"
+  top:"conv7"
+  name:"scale7"
+  type: "Scale"
+  scale_param {
+    bias_term: true
+  }
+}
+layer {
+  bottom: "conv7"
+  top: "conv7"
+  name: "relu7"
+  type: "ReLU"
+}
+
+layer {
+  name: "conv_to_rec"
+  type: "ConvToRecur"
+  bottom: "conv7"
+  bottom: "label"
+  top: "recur_input"
+  top: "indicator"
+  top: "recur_label"
+  include {
+    phase: TRAIN
+  }
+}
+layer {
+  name: "conv_to_rec"
+  type: "ConvToRecur"
+  bottom: "conv7"
+  top: "recur_input"
+  top: "indicator"
+  include {
+    phase: TEST
+  }
+}
+
+layer {
+  name: "lstm1_forward"
+  type: "LSTM"
+  bottom: "recur_input"
+  bottom: "indicator"
+  propagate_down: 1
+  propagate_down: 0
+  top: "lstm1_forward"
+  recurrent_param {
+    num_output: 256
+    weight_filler {
+      type: "gaussian"
+      std: 0.1
+    }
+    bias_filler {
+      type: "constant"
+    }
+  }
+}
+layer {
+  name: "fc1_forward"
+  type: "InnerProduct"
+  bottom: "lstm1_forward"
+  top: "ip1_forward"
+  inner_product_param {
+    num_output: 256
+    weight_filler {
+      type: "gaussian"
+      std: 0.1
+    }
+    axis: 2
+  }
+}
+layer {
+  name: "rev1_a"
+  type: "Reverse"
+  bottom: "recur_input"
+  top: "recur_input_rev"
+  reverse_param {
+    axis: 0
+  }
+}
+layer {
+  name: "lstm1_backward"
+  type: "LSTM"
+  bottom: "recur_input_rev"
+  bottom: "indicator"
+  propagate_down: 1
+  propagate_down: 0
+  top: "lstm1_backward"
+  recurrent_param {
+    num_output: 256
+    weight_filler {
+      type: "gaussian"
+      std: 0.1
+    }
+    bias_filler {
+      type: "constant"
+    }
+  }
+}
+layer {
+  name: "fc1_backward"
+  type: "InnerProduct"
+  bottom: "lstm1_backward"
+  top: "ip1_backward"
+  inner_product_param {
+    num_output: 256
+    weight_filler {
+      type: "gaussian"
+      std: 0.1
+    }
+    axis: 2
+  }
+}
+layer {
+  name: "rev1_b"
+  type: "Reverse"
+  bottom: "ip1_backward"
+  top: "ip1_backward_rev"
+  reverse_param {
+    axis: 0
+  }
+}
+layer {
+  name: "eltwise1"
+  type: "Eltwise"
+  bottom: "ip1_forward"
+  bottom: "ip1_backward_rev"
+  eltwise_param {
+    operation: SUM
+  }
+  top: "sum1"
+}
+
+layer {
+  name: "lstm2_forward"
+  type: "LSTM"
+  bottom: "sum1"
+  bottom: "indicator"
+  propagate_down: 1
+  propagate_down: 0
+  top: "lstm2_forward"
+  recurrent_param {
+    num_output: 256
+    weight_filler {
+      type: "gaussian"
+      std: 0.1
+    }
+    bias_filler {
+      type: "constant"
+    }
+  }
+}
+layer {
+  name: "fc2_forward"
+  type: "InnerProduct"
+  bottom: "lstm2_forward"
+  top: "ip2_forward"
+  inner_product_param {
+    num_output: 37
+    weight_filler {
+      type: "gaussian"
+      std: 0.1
+    }
+    axis: 2
+  }
+}
+layer {
+  name: "rev2_a"
+  type: "Reverse"
+  bottom: "sum1"
+  top: "sum1_rev"
+  reverse_param {
+    axis: 0
+  }
+}
+layer {
+  name: "lstm2_backward"
+  type: "LSTM"
+  bottom: "sum1_rev"
+  bottom: "indicator"
+  propagate_down: 1
+  propagate_down: 0
+  top: "lstm2_backward"
+  recurrent_param {
+    num_output: 256
+    weight_filler {
+      type: "gaussian"
+      std: 0.1
+    }
+    bias_filler {
+      type: "constant"
+    }
+  }
+}
+layer {
+  name: "fc2_backward"
+  type: "InnerProduct"
+  bottom: "lstm2_backward"
+  top: "ip2_backward"
+  inner_product_param {
+    num_output: 37
+    weight_filler {
+      type: "gaussian"
+      std: 0.1
+    }
+    axis: 2
+  }
+}
+layer {
+  name: "rev2_b"
+  type: "Reverse"
+  bottom: "ip2_backward"
+  top: "ip2_backward_rev"
+  reverse_param {
+    axis: 0
+  }
+}
+layer {
+  name: "eltwise2"
+  type: "Eltwise"
+  bottom: "ip2_forward"
+  bottom: "ip2_backward_rev"
+  eltwise_param {
+    operation: SUM
+  }
+  top: "recur_out"
+}
+
+# If the aequences have different lengths within
+# a mini-batch, we should use bottom:"indicator"
+# instead of nct_axis here.
+layer {
+  name: "loss"
+  type: "CTCLoss"
+  bottom: "recur_out"
+  bottom: "recur_label"
+  top: "loss"
+  ctc_param {
+    nct_axis: 1
+	nct_axis: 2
+  }
+  include {
+    phase: TRAIN
+  }
+}
+layer {
+  name: "result"
+  type: "CTCDecoder"
+  bottom: "recur_out"
+  top: "result"
+  ctc_param {
+    nct_axis: 1
+	nct_axis: 2
+  }
+  include {
+    phase: TEST
+  }
+}
+layer {
+  name: "accuracy"
+  type: "SequenceAccuracy"
+  bottom: "result"
+  bottom: "label"
+  top: "accu"
+  include {
+    phase: TEST
+  }
+}

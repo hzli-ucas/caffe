@@ -310,6 +310,7 @@ message ParamSpec {
 //
 // LayerParameter next available layer-specific ID: 147 (last added: recurrent_param)
 // LayerParameter next avaliable layer-specific ID: 148 (last added: ctc_param)
+// LayerParameter next avaliable layer-specific ID: 149 (last added: reverse_param)
 message LayerParameter {
   optional string name = 1; // the layer name
   optional string type = 2; // the layer type
@@ -398,6 +399,7 @@ message LayerParameter {
   optional ReductionParameter reduction_param = 136;
   optional ReLUParameter relu_param = 123;
   optional ReshapeParameter reshape_param = 133;
+  optional ReverseParameter reverse_param = 148;
   optional ScaleParameter scale_param = 142;
   optional SigmoidParameter sigmoid_param = 124;
   optional SoftmaxParameter softmax_param = 125;
@@ -990,6 +992,17 @@ message RecurrentParameter {
   // blobs.  The number of additional bottom/top blobs required depends on the
   // recurrent architecture -- e.g., 1 for RNNs, 2 for LSTMs.
   optional bool expose_hidden = 5 [default = false];
+
+  // Specify the time-steps when converts convolutional-data to recurrent-data
+  // blobs [N x C x H x W]->[T x N x C], the default time-steps is max(H, W).
+  // (Assert that min(H, W) == 1, only in this way can the two-dimension feature
+  // maps be converted to one-dimension time sequences.)
+  // As the input size might change during running time while the network structure
+  // is fixed from the very beginning (unroll a reucurrent layer to multiple layers
+  // according to the number of time-steps in sequences), manually specify a large
+  // enough time-steps to shape the recurrent data blob can prevent oversize error
+  // from recurrent layers when the input size becomes larger than beginning.
+  optional uint32 time_steps = 6 [default = 0];
 }
 
 // Message that stores parameters used by ReductionLayer
@@ -1099,6 +1112,17 @@ message ReshapeParameter {
   //
   optional int32 axis = 2 [default = 0];
   optional int32 num_axes = 3 [default = -1];
+}
+
+message ReverseParameter {
+  // To reverse the arrangement of data in a blob along the specified axis.
+  //   data_previous[n] == data_afterwards[blob.shape(axis)-1 - n]
+  // The parameter axis
+  //   (1) must NOT be specified for recurrent data blobs with indicators, where the
+  //       data order will therefore be swaped in time but not the actual size,
+  //   (2) meanwhile MUST be specified for blobs without indicators in case of misuse.
+  // Note: `axis` may be negative to index from the end (e.g., -1 for the last axis).
+  optional int32 axis = 1;
 }
 
 message ScaleParameter {
