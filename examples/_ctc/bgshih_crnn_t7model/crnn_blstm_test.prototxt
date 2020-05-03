@@ -5,13 +5,13 @@ layer {
   top: "data"
   top: "label"
   transform_param {
-	mean_value: 128
-	scale: 0.0078125
+    mean_value: 128
+    scale: 0.0078125
   }
   data_param {
     # The word images in test set svt contain
-	# at most 13 characters, and the size of
-	# the longest image is 307*32.
+    # at most 13 characters, and the size of
+    # the longest image is 307*32.
     source: "svt_test_grayscale_647_36"
     batch_size: 1
     backend: LMDB
@@ -197,8 +197,8 @@ layer {
     kernel_size: 2
     stride_h: 2
     stride_w: 1
-	pad_h: 0
-	pad_w: 1
+    pad_h: 0
+    pad_w: 1
   }
 }
 layer {
@@ -292,8 +292,8 @@ layer {
     kernel_size: 2
     stride_h: 2
     stride_w: 1
-	pad_h: 0
-	pad_w: 1
+    pad_h: 0
+    pad_w: 1
   }
 }
 layer {
@@ -352,7 +352,7 @@ layer {
   top: "indicator"
   recurrent_param {
     # The largest width of the input is 307
-	# (307 / 2) / 2 + 1 = 78
+    # (307 / 2) / 2 + 1 = 78
     time_steps: 78
   }
 }

@@ -160,6 +160,20 @@ void caffe_gpu_scale<double>(const int n, const double alpha, const double *x,
   CUBLAS_CHECK(cublasDscal(Caffe::cublas_handle(), n, &alpha, y, 1));
 }
 
+template <>
+void caffe_gpu_amax<float>(const int n, const float *x, float* y) {
+  int index = 0;
+  CUBLAS_CHECK(cublasIsamax(Caffe::cublas_handle(), n, x, 1, &index));
+  CUBLAS_CHECK(cublasGetVector(1, sizeof(float), x + index - 1, 1, y, 1));
+}
+
+template <>
+void caffe_gpu_amax<double>(const int n, const double *x, double* y) {
+  int index = 0;
+  CUBLAS_CHECK(cublasIdamax(Caffe::cublas_handle(), n, x, 1, &index));
+  CUBLAS_CHECK(cublasGetVector(1, sizeof(double), x + index - 1, 1, y, 1));
+}
+
 template <typename Dtype>
 __global__ void set_kernel(const int n, const Dtype alpha, Dtype* y) {
   CUDA_KERNEL_LOOP(index, n) {

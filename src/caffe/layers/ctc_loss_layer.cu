@@ -1,5 +1,6 @@
 #include "caffe/layers/ctc_loss_layer.hpp"
-#include <math.h>
+#include <iostream>
+#include <iomanip>
 
 namespace caffe {
 
@@ -26,42 +27,30 @@ __device__ Dtype LogSumExp_kernel(Dtype log_prob_1, Dtype log_prob_2) {
 		: log_prob_2 + log1p(exp(log_prob_1 - log_prob_2));
 }
 
-template <typename Dtype>
-__device__ Dtype max(Dtype lhs, Dtype rhs)
-{
-	return lhs > rhs ? lhs : rhs;
-}
 
 template <typename Dtype>
-__device__ Dtype min(Dtype lhs, Dtype rhs)
-{
-	return lhs < rhs ? lhs : rhs;
-}
-
-template <typename Dtype>
-__global__ void SequenceSoftmaxGPU(
+__global__ void CTCSequenceSoftmaxGPU(
 	const int nthreads			// T * N
 	, const int N, const int C
 	, const int N_step, const int C_step, const int T_step
-	, const Dtype *indicator	// [T, N] if not nullptr
-	, Dtype *const data			// data blob shape
-	)
+	, const Dtype *data			// data blob shape
+	, const Dtype *seq_len		// [N]
+	, Dtype *probability		// data blob shape
+)
 {
+	const int C_end = C * C_step;
 	// compute softmax (until each sequence ends)
 	CUDA_KERNEL_LOOP(index, nthreads) {
 		const int t = index / N;
-		if (indicator)
-		{
-			// if exceeds the sequence length
-			if (t != 0 && indicator[index] == 0)
-			{
-				continue;
-			}
-		}
 		const int n = index % N;
-		Dtype *const data_nt = data + n*N_step + t*T_step;
+		if (t >= static_cast<int>(seq_len[n] + 0.5))
+		{
+			continue;
+		}
+		const int nt_offset = n * N_step + t * T_step;
+		const Dtype *data_nt = data + nt_offset;
+		Dtype *prob_nt = probability + nt_offset;
 		Dtype max_coeff = data_nt[0];
-		const int C_end = C*C_step;
 		// get max coeff
 		for (int i = C_step; i < C_end; i += C_step) {
 			max_coeff = max(max_coeff, data_nt[i]);
@@ -69,36 +58,36 @@ __global__ void SequenceSoftmaxGPU(
 		// calc exp and its sum
 		Dtype sum = 0;
 		for (int i = 0; i < C_end; i += C_step) {
-			data_nt[i] = exp(data_nt[i] - max_coeff);
-			sum += data_nt[i];
+			prob_nt[i] = exp(data_nt[i] - max_coeff);
+			sum += prob_nt[i];
 		}
 		// division by sum
 		for (int i = 0; i < C_end; i += C_step) {
-			data_nt[i] /= sum;
+			prob_nt[i] /= sum;
 		}
 	}
 }
 
 template <typename Dtype>
-__global__ void CalculateCTCLossGPU(
+__global__ void CTCCalculateLossGPU(
 	const int N, const int C, const int T
 	, const int N_step, const int C_step, const int T_step
-	, const Dtype *const probability	// data blob shape
-	, const Dtype *const indicator		// [T, N] if not nullptr
+	, const Dtype *probability		// data blob shape
+	, const Dtype *seq_len			// [N]
 	, const int L, const int label_N_step, const int label_L_step
 	, const int blank_index
-	, const Dtype *const label			// [N, L] or [L, N], decided by the n-axis
-	, int *const prime_len				// [N]
-	, int *const l_primes				// [N, 2L+1]
-	, Dtype *const log_alpha			// [N, 2L+1, T], already initialized to kLogZero
-	, Dtype *const log_beta				// [N, 2L+1, T], already initialized to kLogZero
-	, Dtype *const log_pzx				// [N]
+	, const Dtype *label			// [N, L] or [L, N], decided by the n-axis
+	, int *l_primes					// [N, 2L+1]
+	, int *prime_len				// [N]
+	, Dtype *log_alpha				// [N, 2L+1, T], initialized to kLogZero
+	, Dtype *log_beta				// [N, 2L+1, T], initialized to kLogZero
+	, Dtype *log_pzx				// [N]
 	)
 {
 	CUDA_KERNEL_LOOP(n, N) {
 		// Insert a blank before each element and a blank at the end.
 		const Dtype *label_nl = label + n * label_N_step;
-		int *const l_prime_n = l_primes + n * (2 * L + 1);
+		int *l_prime_n = l_primes + n * (2 * L + 1);
 		// Calculate l_prime length
 		int &U = prime_len[n];
 		U = 0;
@@ -117,25 +106,19 @@ __global__ void CalculateCTCLossGPU(
 		}
 		l_prime_n[U++] = blank_index;
 		// get the sequence length according to the indicator
-		int seq_len_n = T;
-		if (indicator)
+		const int seq_len_n = static_cast<int>(seq_len[n] + 0.5);
+		// although T >= L, it is possible that seq_len < label_len for RNN data,
+		// in which case, set p(z|x) = 0 and skip the calculation of edit distance
+		if (seq_len_n * 2 + 1 < U)
 		{
-			const Dtype *const indicator_n = indicator + n;
-			while (seq_len_n > 0 && indicator_n[(--seq_len_n)*N] == 0);
-			++seq_len_n;
-			// although T >= L, it is possible that seq_len < label_len
-			// in which case, set p(z|x) = 0 and skip the calculation of edit distance
-			if (seq_len_n * 2 + 1 < U)
-			{
-				log_pzx[n] = kLogZero;
-				continue;
-			}
+			log_pzx[n] = kLogZero;
+			continue;
 		}
 		// [N, 2L+1, T] alpha and beta at offset(n, 0, 0)
-		Dtype *const log_alpha_n = log_alpha + n * (2 * L + 1) * T;
-		Dtype *const log_beta_n = log_beta + n * (2 * L + 1) * T;
+		Dtype *log_alpha_n = log_alpha + n * (2 * L + 1) * T;
+		Dtype *log_beta_n = log_beta + n * (2 * L + 1) * T;
 		// data blob shape, probability at offset n*N_step
-		const Dtype *const prob_n = probability + n * N_step;
+		const Dtype *prob_n = probability + n * N_step;
 		// Calculate forward variables
 		// Initialize alpha values in Graves Eq (7.5) and Eq (7.6).
 		log_alpha_n[0] // log_alpha[0, 0]
@@ -174,9 +157,9 @@ __global__ void CalculateCTCLossGPU(
 		// Calculate backward varibles
 		// Initial beta blaues in Graves Eq (7.13): log of probability 1.
 		for (int u = U - 2; u < U; ++u) {
-			log_beta_n[(u + 1) * T - 1] = 0; // log_beta[u, T-1]
+			log_beta_n[u * T + seq_len_n - 1] = 0; // log_beta[u, T-1]
 		}
-		for (int t = seq_len_n - 1 - 1; t >= 0; --t) {
+		for (int t = seq_len_n - 2; t >= 0; --t) {
 			// If there is not enough time steps for the sequence to map to
 			// the previous or remaining labels, leave log_beta[u, t] continue
 			// to be kLogZero.
@@ -219,49 +202,18 @@ __global__ void CalculateCTCLossGPU(
 }
 
 template <typename Dtype>
-void CTCLossLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
-      const vector<Blob<Dtype>*>& top)
-{
-	Blob<Dtype> *const data_blob = bottom[0];
-	const Blob<Dtype> *const label_blob = (bottom.size() == 2) ? bottom[1] : bottom[2];
-	const Dtype *const indicator = (bottom.size() == 2) ? nullptr : bottom[1]->gpu_data();
-	Dtype *const data = data_blob->mutable_gpu_data();
-	if (!already_softmax_){
-		const int nt_count = N_*T_;
-		SequenceSoftmaxGPU<Dtype><<<CAFFE_GET_BLOCKS(nt_count), CAFFE_CUDA_NUM_THREADS>>>(
-			nt_count, N_, C_, N_step_, C_step_, T_step_, indicator, data);
-	}
-	// default blank_index = C - 1
-	const int blank_index = (blank_index_ < 0) ? C_ + blank_index_ : blank_index_;
-	Dtype *const log_alpha = log_alpha_beta_blob_.mutable_gpu_data();
-	Dtype *const log_beta = log_alpha_beta_blob_.mutable_gpu_diff();
-	// Initialize the log_alpha and log_beta blob with kLogZero
-	caffe_gpu_set<Dtype>(log_alpha_beta_blob_.count(), kLogZero, log_alpha);
-	caffe_gpu_set<Dtype>(log_alpha_beta_blob_.count(), kLogZero, log_beta);
-	CalculateCTCLossGPU<Dtype><<<CAFFE_GET_BLOCKS(N_), CAFFE_CUDA_NUM_THREADS>>>(
-		N_, C_, T_, N_step_, C_step_, T_step_, data, indicator,
-		L_, label_N_step_, label_L_step_, blank_index, label_blob->gpu_data(),
-		prime_len_blob_.mutable_gpu_data(), l_primes_blob_.mutable_gpu_data(),
-		log_alpha, log_beta, log_pzx_blob_.mutable_gpu_data());
-	Dtype loss;
-	caffe_gpu_asum<Dtype>(N_, log_pzx_blob_.gpu_data(), &loss);
-	// normalize log probabilities by number of parallel batches
-	top[0]->mutable_cpu_data()[0] = loss / N_;
-}
-
-template <typename Dtype>
-__global__ void LogSumProbGPU(
+__global__ void CTCLogSumProbGPU(
 	const int nthreads				// N * T
 	, const int T, const int Lm2p1	// 2 * L + 1
 	, const int N_step, const int C_step, const int T_step
-	, const int *const prime_len	// [N]
-	, const int *const l_primes		// [N, 2L+1]
-	, const Dtype *const log_alpha	// [N, 2L+1, T]
-	, const Dtype *const log_beta	// [N, 2L+1, T]
-	, const Dtype *const log_pzx	// [N]
-	, const Dtype *const indicator	// [T, N] if not nullptr
-	, Dtype *const log_sum_prob		// data blob shape, already initialized to kLogZero
-	)
+	, const Dtype *seq_len		// [N]
+	, const int *prime_len		// [N]
+	, const int *l_primes		// [N, 2L+1]
+	, const Dtype *log_alpha	// [N, 2L+1, T]
+	, const Dtype *log_beta		// [N, 2L+1, T]
+	, const Dtype *log_pzx		// [N]
+	, Dtype *log_sum_prob		// data blob shape, initialized with kLogZero
+)
 {
 	CUDA_KERNEL_LOOP(index, nthreads) {
 		const int n = index / T;
@@ -273,15 +225,9 @@ __global__ void LogSumProbGPU(
 			continue;
 		}
 		const int t = index % T;
-		if (indicator)
+		if (t >= static_cast<int>(seq_len[n] + 0.5))
 		{
-			// [T, N, C], N = (N*C) / C
-			const int N = T_step / N_step;
-			if (t != 0 && indicator[t*N + n] == 0)
-			{
-				// sequence ends
-				continue;
-			}
+			continue;
 		}
 		const int U = prime_len[n];
 		const int *const l_prime_n = l_primes + n * Lm2p1;
@@ -298,44 +244,182 @@ __global__ void LogSumProbGPU(
 				log_alpha_nt[u * T] + log_beta_nt[u * T]);
 		}
 		// the operation target_prob = exp(log_prob_sum - log_pzx)
-		// will be parallelly performed in function CalculateGradient<<<N*C*T>>>
+		// will be N*C*T-parallelly performed in function TargetProbGPU
 	}
 }
 
 template <typename Dtype>
-__global__ void CalculateCTCGradientGPU(
+__global__ void CTCTargetProbGPU(
 	const int nthreads // N * C * T
 	, const int N, const int N_step
-	, const bool already_softmax
 	, const Dtype *log_pzx			// [N]
-	, const Dtype *predict_prob		// data blob shape
-	, Dtype *diff					// data blob shape, still log_prob_sum now
-	)
+	, Dtype *target_prob			// data blob shape, still log_prob_sum now
+)
 {
 	CUDA_KERNEL_LOOP(index, nthreads) {
 		// if log_pzx_n == kLogZero or the sequence ends already
 		// there must be target_prob_nct == kLogZero
-		Dtype &diff_nct = diff[index];
-		if (diff_nct == kLogZero){
-			diff_nct = already_softmax ? 0 : predict_prob[index];
+		Dtype &prob_nct = target_prob[index];
+		if (prob_nct == kLogZero) {
+			prob_nct = 0;
 			continue;
 		}
 		const int n = (index % (N_step * N)) / N_step;
 		const Dtype log_pzx_n = log_pzx[n];
 		// log_pzx_n cannot be kLogZero then
-		if (diff_nct >= log_pzx_n) {
-			diff_nct = already_softmax ? 
-				(-1 / predict_prob[index]) : 
-				(predict_prob[index] - 1);
+		if (prob_nct >= log_pzx_n) {
+			prob_nct = 1;
 		}
 		else {
-			diff_nct = exp(diff_nct - log_pzx_n);
-			diff_nct = already_softmax ? 
-				(-diff_nct / predict_prob[index]) : 
-				(predict_prob[index] - diff_nct);
+			prob_nct = exp(prob_nct - log_pzx_n);
 		}
 	}
 }
+
+template <typename Dtype>
+void CTCLossLayer<Dtype>::GetTarget_gpu(const Dtype *predict_prob,
+	const Dtype *label, Dtype *target_prob)
+{
+	const int nt_count = N_ * T_;
+	const int nct_count = nt_count * C_;
+	// default blank_index = C - 1
+	const int blank_index = (blank_index_ < 0) ? C_ + blank_index_ : blank_index_;
+	Dtype *log_alpha = log_alpha_beta_blob_.mutable_gpu_data();
+	Dtype *log_beta = log_alpha_beta_blob_.mutable_gpu_diff();
+	// Initialize the log_alpha and log_beta blob with kLogZero
+	caffe_gpu_set<Dtype>(log_alpha_beta_blob_.count(), kLogZero, log_alpha);
+	caffe_gpu_set<Dtype>(log_alpha_beta_blob_.count(), kLogZero, log_beta);
+	CTCCalculateLossGPU<Dtype><<<CAFFE_GET_BLOCKS(N_), CAFFE_CUDA_NUM_THREADS>>>(
+		N_, C_, T_, N_step_, C_step_, T_step_, predict_prob,
+		log_pzx_blob_.gpu_diff(), // length of each sequence
+		L_, label_N_step_, label_L_step_, blank_index, label,
+		l_primes_blob_.mutable_gpu_data(), prime_len_blob_.mutable_gpu_data(),
+		log_alpha, log_beta, log_pzx_blob_.mutable_gpu_data());
+	caffe_gpu_set<Dtype>(nct_count, kLogZero, target_prob);
+	CTCLogSumProbGPU<Dtype><<<CAFFE_GET_BLOCKS(nt_count), CAFFE_CUDA_NUM_THREADS>>>(
+		nt_count, T_, 2 * L_ + 1, N_step_, C_step_, T_step_, log_pzx_blob_.gpu_diff(),
+		prime_len_blob_.gpu_data(), l_primes_blob_.gpu_data(),
+		log_alpha, log_beta, log_pzx_blob_.gpu_data(), target_prob);
+	CTCTargetProbGPU<Dtype><<<CAFFE_GET_BLOCKS(nct_count), CAFFE_CUDA_NUM_THREADS>>>(
+		nct_count, N_, N_step_, log_pzx_blob_.gpu_data(), target_prob);
+}
+
+template <typename Dtype>
+void CTCLossLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top)
+{
+	// calculate the length of each sequence
+	if (bottom.size() == 2) {
+		caffe_gpu_set(N_, (Dtype)T_, log_pzx_blob_.mutable_gpu_diff());
+	}
+	else {
+		// [T, N] -> [N]
+		stride_sum(N_, T_, bottom[1]->gpu_data(), log_pzx_blob_.mutable_gpu_diff());
+		caffe_gpu_add_scalar(N_, (Dtype)1, log_pzx_blob_.mutable_gpu_diff());
+	}
+	const Dtype *label = (bottom.size() == 2) ? bottom[1]->gpu_data() : bottom[2]->gpu_data();
+	Dtype *predict_prob = prob_.mutable_gpu_data();
+	Dtype *target_prob = prob_.mutable_gpu_diff();
+	CTCSequenceSoftmaxGPU<Dtype><<<CAFFE_GET_BLOCKS(N_ * T_), CAFFE_CUDA_NUM_THREADS>>>(
+		N_ * T_, N_, C_, N_step_, C_step_, T_step_, bottom[0]->gpu_data(), log_pzx_blob_.gpu_diff(), predict_prob);
+	GetTarget_gpu(predict_prob, label, target_prob);
+
+	Dtype loss;
+	caffe_gpu_asum<Dtype>(N_, log_pzx_blob_.gpu_data(), &loss);
+	// normalize log probabilities by number of parallel batches
+	top[0]->mutable_cpu_data()[0] = loss / N_;
+}
+
+
+template <typename Dtype>
+__global__ void CTCReweightGPU(
+	const int nthreads				// T * N
+	, const int dim, const int step
+	, const Dtype *weight			// [N]
+	, Dtype *data					// [T, N]
+)
+{
+	CUDA_KERNEL_LOOP(index, nthreads) {
+		const int i = (index % (step * dim)) / step;
+		data[index] *= weight[i];
+	}
+}
+
+template <typename Dtype>
+__global__ void CTCReweightGPU(
+	const int nthreads				// N * C * T
+	, const int dim1, const int step1
+	, const int dim2, const int step2
+	, const Dtype *weight			// [T, N]
+	, Dtype *data					// data blob shape
+)
+{
+	CUDA_KERNEL_LOOP(index, nthreads) {
+		const int i = (index % (step1 * dim1)) / step1;
+		const int j = (index % (step2 * dim2)) / step2;
+		data[index] *= weight[i * dim2 + j];
+	}
+}
+
+template <typename Dtype>
+__global__ void CTCMaxNegChannelGPU(
+	const int nthreads // T * N
+	, const int N, const int C
+	, const int N_step, const int C_step, const int T_step
+	, const Dtype *data				// data blob shape
+	, const Dtype *seq_len			// [N]
+	, Dtype *weight					// [T, N], the weight for each timestep
+)
+{
+	const int C_end = C * C_step;
+	CUDA_KERNEL_LOOP(index, nthreads) {
+		Dtype &weight_nt = weight[index];
+		weight_nt = 0;
+		const int t = index / N;
+		const int n = index % N;
+		if (t >= static_cast<int>(seq_len[n] + 0.5))
+		{
+			continue;
+		}
+		const Dtype *data_nt = data + n * N_step + t * T_step;
+		for (int i = 0; i < C_end; i += C_step) {
+			if (data_nt[i] < weight_nt)
+				weight_nt = data_nt[i];
+		}
+		weight_nt = -weight_nt;
+	}
+}
+
+template <typename Dtype>
+__global__ void permute_kernel(const int nthreads,
+	const int dim1_outer, const int dim2_outer, const int dim3_outer,
+	const int dim1_step, const int dim2_step, const int dim3_step,
+	const int dst_dim1_step, const int dst_dim2_step, const int dst_dim3_step,
+	const Dtype *src, Dtype *dst)
+{
+	CUDA_KERNEL_LOOP(index, nthreads) {
+		const int d1 = (index % dim1_outer) / dim1_step;
+		const int d2 = (index % dim2_outer) / dim2_step;
+		const int d3 = (index % dim3_outer) / dim3_step;
+		dst[d1 * dst_dim1_step + d2 * dst_dim2_step + d3 * dst_dim3_step] = src[index];
+	}
+}
+
+template <typename Dtype>
+__global__ void inverse_kernel(const int n, const Dtype* a, Dtype* b, const Dtype when_zero = 1 / (Dtype)FLT_MIN) {
+	CUDA_KERNEL_LOOP(index, n) {
+		b[index] = a[index] ? (1 / a[index]) : when_zero;
+	}
+}
+
+// Defined in softmax_FL_layer.cu
+template <typename Dtype>
+void stride_sum(const int stride, const int count, const Dtype *src, Dtype *dst);
+
+template <typename Dtype>
+Dtype get_tmp_parameter(const vector<Dtype> &parameters,
+	const vector<int> &stepvalues, const int tmp_step);
+
 
 template <typename Dtype>
 void CTCLossLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& top,
@@ -345,30 +429,118 @@ void CTCLossLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& top,
 		LOG(INFO) << "Skip CTC Loss BackwardCPU";
 		return;
 	}
-	const int nt_count = N_*T_;
+	const int nt_count = N_ * T_;
 	const int nct_count = nt_count * C_;
-	Blob<Dtype> *const data_blob = bottom[0];
-	Dtype *const diff = data_blob->mutable_gpu_diff();
-	// the data_diff is first used as log_prob_sum
-	// before the final gradient calculation
-	caffe_gpu_set<Dtype>(nct_count, kLogZero, diff);
-	const Dtype *const indicator = (bottom.size() == 2) ? nullptr : bottom[1]->gpu_data();
-	LogSumProbGPU<Dtype><<<CAFFE_GET_BLOCKS(nt_count), CAFFE_CUDA_NUM_THREADS>>>(
-		nt_count, T_, 2 * L_ + 1, N_step_, C_step_, T_step_, prime_len_blob_.gpu_data(), l_primes_blob_.gpu_data(),
-		log_alpha_beta_blob_.gpu_data(), log_alpha_beta_blob_.gpu_diff(), log_pzx_blob_.gpu_data(), indicator, diff);
-	CalculateCTCGradientGPU<Dtype><<<CAFFE_GET_BLOCKS(nct_count), CAFFE_CUDA_NUM_THREADS>>>(
-		nct_count, N_, N_step_, already_softmax_, log_pzx_blob_.gpu_data(), data_blob->gpu_data(), diff);
-	// Scale gradient
-	Dtype loss_coefficient = 0;
-	if (indicator) // the recurrent data
+	Dtype *diff = bottom[0]->mutable_gpu_diff();
+	const Dtype *predict_prob = prob_.gpu_data();
+	Dtype *target_prob = prob_.mutable_gpu_diff(); // may be modified later
+	// default blank_index = C - 1
+	const int blank_index = (blank_index_ < 0) ? C_ + blank_index_ : blank_index_;
+
+	tmp_iter_++;
+	const Dtype gamma = gammas_.empty() ? 0 :
+		get_tmp_parameter<Dtype>(gammas_, stepvalues_, tmp_iter_);
+	const Dtype alpha = alphas_.empty() ? 0 :
+		get_tmp_parameter<Dtype>(alphas_, stepvalues_, tmp_iter_);
+	const Dtype label_width = this->layer_param_.ctc_param().label_width();
+
+	if (alpha || label_width)
 	{
-		caffe_gpu_asum<Dtype>(nt_count, indicator, &loss_coefficient);
-		loss_coefficient += N_;
+		// get the positive-negative ratio
+		permute_kernel<Dtype><<<CAFFE_GET_BLOCKS(nct_count), CAFFE_CUDA_NUM_THREADS>>>(
+			nct_count, N_ * N_step_, C_ * C_step_, T_ * T_step_, N_step_, C_step_, T_step_,
+			C_, 1, N_ * C_, target_prob, diff);
+		stride_sum(C_, nt_count, diff, diff); // [T, N, C] -> [C]
+		
+		const bool balanced = this->layer_param_.ctc_param().balanced();
+		Dtype *count_cpu = label_count_.mutable_cpu_data();
+		if (balanced || label_width) {
+			caffe_set<Dtype>(C_, 0, count_cpu);
+			const Dtype *label_cpu = (bottom.size() == 2) ? bottom[1]->cpu_data() : bottom[2]->cpu_data();
+			for (int n = 0; n < N_; ++n) {
+				for (int l = 0; l < L_; ++l) {
+					Dtype label_val = label_cpu[n*label_N_step_ + l * label_L_step_];
+					if (label_val < 0)
+						break;
+					++count_cpu[static_cast<int>(label_val + 0.5)];
+				}
+			}
+			count_cpu[blank_index] = caffe_cpu_asum<Dtype>(C_, count_cpu);
+		}
+
+		if (balanced) {
+			if (alpha) {
+				count_cpu[blank_index] *= (1 - alpha) / alpha;
+			}
+			else // must be label_width
+			{
+				Dtype amount_all;
+				caffe_gpu_asum<Dtype>(C_, diff, &amount_all);
+				for (int c = 0; c < C_; ++c) {
+					count_cpu[c] *= label_width;
+				}
+				count_cpu[blank_index] = max(amount_all - count_cpu[blank_index], (Dtype)0);
+				if (count_cpu[blank_index])
+					LOG(WARNING) << "The label may be too wide to be contained in the sequence.";
+			}
+			inverse_kernel<Dtype><<<CAFFE_GET_BLOCKS(C_), CAFFE_CUDA_NUM_THREADS>>>(C_, diff, diff);
+			caffe_gpu_mul<Dtype>(C_, label_count_.gpu_data(), diff, diff);
+		}
+		else {
+			Dtype amount_blank, amount_all;
+			caffe_gpu_asum<Dtype>(C_, diff, &amount_all);
+			caffe_gpu_asum<Dtype>(1, diff + blank_index, &amount_blank);
+			if (alpha) {
+				amount_all = alpha / amount_all;
+				amount_blank = (1 - alpha) / amount_blank;
+			}
+			else // must be label_width
+			{
+				count_cpu[blank_index] *= label_width;
+				amount_blank = max(amount_all - count_cpu[blank_index], (Dtype)0) / amount_blank;
+				amount_all = count_cpu[blank_index] / amount_all;
+			}
+			caffe_gpu_set<Dtype>(C_, amount_all, diff);
+			caffe_gpu_set<Dtype>(1, amount_blank, diff + blank_index);
+		}
+		
+		// adjust the target class ratio
+		target_prob = prob_.mutable_gpu_diff();
+		CTCReweightGPU<Dtype><<<CAFFE_GET_BLOCKS(nct_count), CAFFE_CUDA_NUM_THREADS>>>(
+			nct_count, C_, C_step_, diff, target_prob);
+		// normalize to ensure probabilites of all classes sum to one for each sample
+		permute_kernel<Dtype><<<CAFFE_GET_BLOCKS(nct_count), CAFFE_CUDA_NUM_THREADS>>>(
+			nct_count, N_ * N_step_, C_ * C_step_, T_ * T_step_, N_step_, C_step_, T_step_,
+			1, nt_count, N_, target_prob, diff);
+		stride_sum(nt_count, C_, diff, diff); // [C, T, N] -> [T, N]
+		inverse_kernel<Dtype><<<CAFFE_GET_BLOCKS(nt_count), CAFFE_CUDA_NUM_THREADS>>>(nt_count, diff, diff);
+		CTCReweightGPU<Dtype><<<CAFFE_GET_BLOCKS(nct_count), CAFFE_CUDA_NUM_THREADS>>>(
+			nct_count, T_, T_step_, N_, N_step_, diff, target_prob);
 	}
-	else {
-		loss_coefficient = nt_count;
+	
+	caffe_gpu_sub<Dtype>(nct_count, predict_prob, target_prob, diff);
+
+	if (gamma) {
+		// unused space [N, 2L+1, T], we use it for gamma-reweighting
+		Dtype *log_alpha = log_alpha_beta_blob_.mutable_gpu_data();
+		Dtype *log_beta = log_alpha_beta_blob_.mutable_gpu_diff();
+		// \max_k{(target - predict)_k} = \max_k{-(predict - target)_k} = -\min_k{(predict - target)_k}
+		CTCMaxNegChannelGPU<Dtype><<<CAFFE_GET_BLOCKS(nt_count), CAFFE_CUDA_NUM_THREADS>>>(
+			nt_count, N_, C_, N_step_, C_step_, T_step_, diff, log_pzx_blob_.gpu_diff(), log_alpha);
+		Dtype dtype_val;
+		caffe_gpu_amax<Dtype>(nt_count, log_alpha, &dtype_val);
+		caffe_gpu_scal<Dtype>(nt_count, 1 / dtype_val, log_alpha);
+		caffe_gpu_powx<Dtype>(nt_count, log_alpha, gamma, log_alpha);
+		stride_sum(N_, T_, log_alpha, log_beta); // [T, N] -> [N]
+		inverse_kernel<Dtype><<<CAFFE_GET_BLOCKS(N_), CAFFE_CUDA_NUM_THREADS>>>(N_, log_beta, log_beta, 0);
+		caffe_gpu_mul<Dtype>(N_, log_pzx_blob_.gpu_diff(), log_beta, log_beta);
+		CTCReweightGPU<Dtype><<<CAFFE_GET_BLOCKS(nt_count), CAFFE_CUDA_NUM_THREADS>>>(
+			nt_count, N_, 1, log_beta, log_alpha);
+		CTCReweightGPU<Dtype><<<CAFFE_GET_BLOCKS(nct_count), CAFFE_CUDA_NUM_THREADS>>>(
+			nct_count, T_, T_step_, N_, N_step_, log_alpha, diff);
 	}
-	Dtype loss_weight = top[0]->cpu_diff()[0] / loss_coefficient;
+	// Scale gradient
+	Dtype loss_weight = top[0]->cpu_diff()[0] / N_;
 	caffe_gpu_scal<Dtype>(nct_count, loss_weight, diff);
 }
 

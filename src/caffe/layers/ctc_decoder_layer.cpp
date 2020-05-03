@@ -219,9 +219,7 @@ void CTCDecoderLayer<Dtype>::Decode(
 	}
 	case CTCParameter_DecodeOpt_BEAM_SEARCH:
 	{
-		if (!ctc_param_.already_softmax()) {
-			SequenceSoftmax(data_blob, indicator);
-		}
+		SequenceSoftmax(data_blob, indicator);
 		const int blank_offset = blank_index * C_step_;
 		// map< y, pair< Pr+, Pr-> >, y is the sequence in set B and B_hat
 		// Pr(y, t) corresponds to B, Pr(y, t-1) corresponds to B_hat

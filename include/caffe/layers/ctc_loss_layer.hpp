@@ -25,6 +25,8 @@ namespace caffe {
  */
 template <typename Dtype>
 class CTCLossLayer : public Layer<Dtype> {
+	// Didn't choose LossLayer as father class, because its
+	// bottom blobs must be of an exact number.
 public:
 	explicit CTCLossLayer(const LayerParameter& param);
 	virtual ~CTCLossLayer();
@@ -36,7 +38,8 @@ public:
 
 	virtual inline const char* type() const { return "CTCLoss"; }
 
-	// probabilities, target sequence
+	// 2: outputs, label sequence
+	// 3: outputs, indicator, label sequence
 	virtual inline int MinBottomBlobs() const { return 2; }
 	virtual inline int MaxBottomBlobs() const { return 3; }
 
@@ -102,45 +105,17 @@ protected:
 		const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom);
 
 private:
-	/**
-	* @brief Calculates the loss of the given data batch
-	*/
-	void CalculateLoss(Dtype &loss, Blob<Dtype> *data_blob, 
-		const Blob<Dtype> *label_blob);
+	void GetTarget_gpu(const Dtype *predict_prob, const Dtype *label, Dtype *target_prob);
+	void GetTarget_cpu(const Dtype *predict_prob, const Dtype *label, Dtype *target_prob);
 	/**
 	* @brief Normalize the input data with softmax
 	*/
-	void SequenceSoftmax(Blob<Dtype> *data_blob);
-	/**
-	* @brief Transform a sequence to the sequence with inserted blanks.
-	*   (label_0, label_1, ...) -> (blank, label_0, blank, label_1, blank, ..., blank)
-	*   get l_primes_blob_, the sequence with inserted blanks
-	*   get prime_len_blob_, the length of the output will be |l_prime| = 2 * |l| + 1.
-	*/
-	void LabelPrimes(const Blob<Dtype> *label_blob);
-	/**
-	* @brief Calculates the forward variables of the CTC algorithm
-	*/
-	void CalculateForwardVariables(const int U, Dtype *log_alpha_n,
-		const Dtype *prob_n, const int *l_prime_n, const int seq_len_n);
-	/**
-	* @brief Calculates the backward variables of the CTC algorithm
-	*/
-	void CalculateBackwardVariables(const int U, Dtype *log_beta_n,
-		const Dtype *prob_n, const int *l_prime_n, const int seq_len_n);
-
-	/**
-	* @brief Calculate the gradient of the input variables
-	*/
-	void CalculateGradient(Blob<Dtype> *data_blob);
-
+	void SequenceSoftmax(const Dtype *data, const int *seq_len, Dtype *probability);
+	
+	int N_axis_, C_axis_, T_axis_;
 	// specify the channel index for blank label
 	// the default blank index is (channels - 1)
 	int blank_index_;
-	// indicate if the input data has already been processed by a softmax layer
-	// if (already_softmax) { prob = data; gradient = -target_prob / prob; }
-	// if (!already_softmax) { prob = softmax(data); gradient = prob - target_prob; }
-	bool already_softmax_;
 	int N_;	// batch size
 	int C_;	// class number
 	int T_;	// time steps
@@ -151,19 +126,26 @@ private:
 	// Intermediate variables that are calculated during the forward pass
 	// and reused during the backward pass
 
+	/// prob stores the output probability predictions from the SoftmaxLayer.
+	Blob<Dtype> prob_;
 	// [N, 2L+1] blobs to store the l_primes of the sequences
 	// (label_0, label_1, ...) -> (blank, label_0, blank, label_1, blank, ..., blank)
 	Blob<int> l_primes_blob_;
 	// [N] blob to store the prime lengths U = label_len * 2 + 1
 	// the label_len is the actual label length, which is no larger than L
 	Blob<int> prime_len_blob_;
-	// prime_len_blob.diff() is used to store the RNN data sequence lengths according to the indicator
-	int *seq_len_; // only used in CPU mode
 	// [N, 2L+1, T] blobs to store the alpha and beta variables of each input sequence
 	// blob.data() for alpha variables, blob.diff() for beta variables
 	Blob<Dtype> log_alpha_beta_blob_;
 	// [N] blob to store log(p(z|x)) for each sequence
 	Blob<Dtype> log_pzx_blob_;
+	// We use log_pzx_blob_.diff() to store the RNN data sequence lengths
+
+	// parameters for modification on CTC
+	vector<Dtype> gammas_, alphas_;
+	int tmp_iter_;
+	vector<int> stepvalues_;
+	Blob<Dtype> label_count_; // [C]
 };
 
 }  // namespace caffe

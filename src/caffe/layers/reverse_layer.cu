@@ -48,7 +48,7 @@ __global__ void ReverseAlongAxisGPU(const int nthreads, const int outer_step,
     const int i = index / outer_step;
     int tmp_index = index % outer_step;
     const int j = tmp_index / axis_inner;
-    const int dest_index = i*outer_step + (axis_len - j)*axis_inner + (tmp_index % axis_inner);
+    const int dest_index = i*outer_step + (axis_len - 1 - j)*axis_inner + (tmp_index % axis_inner);
     dest_data[dest_index] = src_data[index];
   }
 }
