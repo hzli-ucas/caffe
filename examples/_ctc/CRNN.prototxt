@@ -1,32 +1,14 @@
 
 layer {
   name: "data"
-  type: "Data"
+  type: "LmdbData"
   top: "data"
   top: "label"
-  include {
-    phase: TRAIN
-  }
-  data_param {
-    source: "D:/mjsynth_digits100"
-    batch_size: 32
-    backend: LMDB
-    label_size: 35
-  }
-}
-layer {
-  name: "data"
-  type: "Data"
-  top: "data"
-  top: "label"
-  include {
-    phase: TEST
-  }
-  data_param {
-    source: "D:/mjsynth_digits100"
-    batch_size: 32
-    backend: LMDB
-    label_size: 35
+  lmdb_data_param {
+    source: "C:/Synth_trainval"
+    new_width: 100
+    batch_size: 100
+    label_size: 25
   }
 }
 layer {
@@ -134,15 +116,15 @@ layer {
   }
 }
 layer {
-  bottom:"conv3"
-  top:"conv3"
-  name:"bnorm3"
-  type:"BatchNorm"
+  bottom: "conv3"
+  top: "conv3"
+  name: "bnorm3"
+  type: "BatchNorm"
 }
 layer {
-  bottom:"conv3"
-  top:"conv3"
-  name:"scale3"
+  bottom: "conv3"
+  top: "conv3"
+  name: "scale3"
   type: "Scale"
   scale_param {
     bias_term: true
@@ -197,8 +179,8 @@ layer {
     kernel_size: 2
     stride_h: 2
     stride_w: 1
-	pad_h: 0
-	pad_w: 1
+    pad_h: 0
+    pad_w: 1
   }
 }
 layer {
@@ -218,15 +200,15 @@ layer {
   }
 }
 layer {
-  bottom:"conv5"
-  top:"conv5"
-  name:"bnorm5"
-  type:"BatchNorm"
+  bottom: "conv5"
+  top: "conv5"
+  name: "bnorm5"
+  type: "BatchNorm"
 }
 layer {
-  bottom:"conv5"
-  top:"conv5"
-  name:"scale5"
+  bottom: "conv5"
+  top: "conv5"
+  name: "scale5"
   type: "Scale"
   scale_param {
     bias_term: true
@@ -281,8 +263,8 @@ layer {
     kernel_size: 2
     stride_h: 2
     stride_w: 1
-	pad_h: 0
-	pad_w: 1
+    pad_h: 0
+    pad_w: 1
   }
 }
 layer {
@@ -301,15 +283,15 @@ layer {
   }
 }
 layer {
-  bottom:"conv7"
-  top:"conv7"
-  name:"bnorm7"
-  type:"BatchNorm"
+  bottom: "conv7"
+  top: "conv7"
+  name: "bnorm7"
+  type: "BatchNorm"
 }
 layer {
-  bottom:"conv7"
-  top:"conv7"
-  name:"scale7"
+  bottom: "conv7"
+  top: "conv7"
+  name: "scale7"
   type: "Scale"
   scale_param {
     bias_term: true
@@ -333,6 +315,9 @@ layer {
   include {
     phase: TRAIN
   }
+  #recurrent_param {
+    #time_steps: 56
+  #}
 }
 layer {
   name: "conv_to_rec"
@@ -535,8 +520,8 @@ layer {
   top: "recur_out"
 }
 
-# If the aequences have different lengths within
-# a mini-batch, we should use bottom:"indicator"
+# If the sequences have different lengths within
+# a mini-batch, we should use bottom: "indicator"
 # instead of nct_axis here.
 layer {
   name: "loss"
@@ -546,7 +531,10 @@ layer {
   top: "loss"
   ctc_param {
     nct_axis: 1
-	nct_axis: 2
+    nct_axis: 2
+    # uncomment parameters below for using
+    #alpha: 0.5
+    #gamma: 1
   }
   include {
     phase: TRAIN
@@ -559,10 +547,7 @@ layer {
   top: "result"
   ctc_param {
     nct_axis: 1
-	nct_axis: 2
-  }
-  include {
-    phase: TEST
+    nct_axis: 2
   }
 }
 layer {
@@ -571,7 +556,5 @@ layer {
   bottom: "result"
   bottom: "label"
   top: "accu"
-  include {
-    phase: TEST
-  }
+  top: "dist"
 }

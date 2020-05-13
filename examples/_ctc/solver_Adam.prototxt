@@ -1,0 +1,10 @@
+net: "CRNN.prototxt"
+type: "Adam"
+base_lr: 0.001
+momentum: 0.9
+lr_policy: "fixed"
+display: 10
+max_iter: 250000
+snapshot: 50000
+snapshot_prefix: ""
+solver_mode: GPU
