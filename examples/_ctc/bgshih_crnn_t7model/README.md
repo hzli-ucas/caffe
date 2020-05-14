@@ -1,4 +1,4 @@
-The `crnn.caffemodel` here is converted from the `crnn_demo_model.t7` model offered by [bgshih](https://github.com/bgshih/crnn).
+Before running the `\_test.bat`, download `crnn.caffemodel` from [here](https://drive.google.com/open?id=1mNQPvw16ZRT5ZFxS8sajYCWulBASAOQ5). This model is converted from the `crnn_demo_model.t7` model offered by [bgshih](https://github.com/bgshih/crnn).
 
 We use pytorch\*, the `load_lua` function to read the .t7 file and get a `hashable_uniq_dict`, it has two tensor lists named *parameters* and *bnVars*. Each tensor in the lists contains the weights/biases/means/vars of a convolution/linear/lstm/batchnorm layer. We convert the pytorch-tensor into numpy type, then write the weights to a caffemodel file. 
 
