@@ -1,4 +1,4 @@
-This is the [caffe](https://github.com/BVLC/caffe) project for [**Reinterpreting CTC training as iterative fitting**. Hongzhu Li and Weiqiang Wang. Pattern Recognition, Volume 105, 2020.](https://doi.org/10.1016/j.patcog.2020.107392)
+This is the [caffe](https://github.com/BVLC/caffe) project for [**Reinterpreting CTC training as iterative fitting**. Hongzhu Li and Weiqiang Wang. Pattern Recognition, Volume 105, 2020.](https://arxiv.org/abs/1904.10619)
 
 # Abstract
 
